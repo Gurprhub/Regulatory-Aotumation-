@@ -217,3 +217,101 @@ class TestArchiveApi:
         for route in app.routes:
             if getattr(route, "path", "").startswith("/api/archive"):
                 assert set(getattr(route, "methods", set())) <= {"GET", "HEAD", "OPTIONS"}
+
+
+class TestColumnWidths:
+    """Every value in the *whole* dataset must fit the column that receives it.
+
+    This exists because it did not: the importer ran green on SQLite and on a
+    40-row test slice, then failed on PostgreSQL against the full 7,536
+    endorsements, where one field was three times its declared width. SQLite
+    ignores VARCHAR limits; PostgreSQL enforces them. Checking the source
+    lengths costs nothing and catches the whole class before a deploy does.
+    """
+
+    @staticmethod
+    def _limits(model) -> dict[str, int]:
+        from sqlalchemy import String
+
+        return {
+            column.name: column.type.length
+            for column in model.__table__.columns
+            if isinstance(column.type, String) and column.type.length is not None
+        }
+
+    @pytest.mark.parametrize(
+        ("dataset", "model_name", "fields"),
+        [
+            (
+                "ENDORSE",
+                "Endorsement",
+                {
+                    "rf": "agenda_ref",
+                    "pg": "page",
+                    "en": "en_number",
+                    "ap": "applicant",
+                    "pr": "product",
+                    "cir": "cir_number",
+                    "ty": "endorsement_type",
+                    "dc": "decision",
+                },
+            ),
+            (
+                "ITEMS",
+                "Certificate",
+                {
+                    "title": "title",
+                    "cir": "cir_number",
+                    "fno": "file_number",
+                    "sec": "section",
+                    "cat": "category",
+                    "kindFull": "kind",
+                    "regType": "reg_type",
+                    "form": "formulation",
+                    "shelf": "shelf_life",
+                    "file": "source_file",
+                    "dir": "source_dir",
+                },
+            ),
+            (
+                "SOURCES",
+                "ImportSource",
+                {
+                    "tech": "technical",
+                    "cir": "cir_number",
+                    "via": "via",
+                    "supplier": "supplier",
+                },
+            ),
+        ],
+    )
+    def test_source_values_fit(self, dataset: str, model_name: str, fields: dict) -> None:
+        import app.models as models_module
+
+        limits = self._limits(getattr(models_module, model_name))
+        too_long: list[str] = []
+
+        for row in PAGE_DATA[dataset]:
+            for source_key, column in fields.items():
+                limit = limits.get(column)
+                if limit is None:  # unbounded column, nothing to outgrow
+                    continue
+                value = row.get(source_key)
+                if value is None:
+                    continue
+                length = len(str(value).strip())
+                if length > limit:
+                    too_long.append(f"{model_name}.{column}: {length} > {limit}")
+
+        assert not too_long, "values exceed their column: " + "; ".join(sorted(set(too_long))[:5])
+
+    def test_section_names_fit(self) -> None:
+        from app.models import CertificateSection
+
+        limit = self._limits(CertificateSection)["name"]
+        names = {
+            name
+            for record in PAGE_DATA["RECS"].values()
+            for name in (record.get("sections") or {})
+        }
+        assert names and max(len(name) for name in names) <= limit

@@ -560,7 +560,11 @@ class Endorsement(Base):
     #: Agenda item reference within the meeting, e.g. "8.2".
     agenda_ref: Mapped[str | None] = mapped_column(String(40), nullable=True)
     page: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    en_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #: Unbounded on purpose: a single item can carry a list of EN numbers
+    #: ("EN-55483, EN-55485, ..."), and the longest in the current minutes is
+    #: 148 characters. A fixed ceiling here is a bug waiting for the next
+    #: import, and PostgreSQL enforces one where SQLite silently ignores it.
+    en_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     applicant: Mapped[str | None] = mapped_column(String(400), index=True, nullable=True)
     product: Mapped[str | None] = mapped_column(String(400), index=True, nullable=True)
     cir_number: Mapped[str | None] = mapped_column(String(300), nullable=True)
