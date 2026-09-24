@@ -1,0 +1,48 @@
+# A complete local stack: the app plus its database.
+#
+# Copy .env.example to .env, set the secrets, then:
+#
+#     docker compose up --build
+#
+# The dashboard is then on http://localhost:8000.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-regulatory}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-regulatory}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The app must not start against a database that is not accepting
+      # connections yet, or the first boot fails on an empty schema.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-regulatory} -d ${POSTGRES_DB:-regulatory}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-regulatory}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-regulatory}
+      # Off here because this compose file serves plain HTTP on localhost.
+      # Set it to true anywhere the app is reached over HTTPS.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_HOURS: ${SESSION_HOURS:-12}
+      CRITICAL_DAYS: ${CRITICAL_DAYS:-30}
+      WARNING_DAYS: ${WARNING_DAYS:-90}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+      # Used only while the database holds no accounts at all.
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    ports:
+      - "${PORT:-8000}:8000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

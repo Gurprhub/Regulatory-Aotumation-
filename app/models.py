@@ -393,6 +393,208 @@ class AuditEvent(Base):
     changes: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
+# --------------------------------------------------------------------------- #
+# The certificate archive
+#
+# Read from the CIB&RC certificates and the RC meeting minutes, and imported
+# rather than entered: these tables are a faithful copy of source documents, so
+# they are deliberately *not* in the audit trail's AUDITED set. Nothing here is
+# edited by a user — a correction means re-running the import against a
+# corrected source, and the source file is named on every certificate so a row
+# can always be traced back to the page it came from.
+# --------------------------------------------------------------------------- #
+class Clause(Base):
+    """One condition of registration, shared by every certificate that carries it.
+
+    The certificates repeat the same standard conditions over and over; 300
+    certificates draw on 125 distinct clauses, so they are stored once.
+    """
+
+    __tablename__ = "clauses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TextBlock(Base):
+    """A block of approved label or leaflet text, shared the same way."""
+
+    __tablename__ = "text_blocks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Certificate(Base):
+    """A CIB&RC certificate of registration, as printed."""
+
+    __tablename__ = "certificates"
+    __table_args__ = (
+        UniqueConstraint("item_no", name="uq_certificates_item_no"),
+        Index("ix_certificates_cir", "cir_number"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: Position in the source set; the stable key the import matches on.
+    item_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(400), index=True, nullable=False)
+    cir_number: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    file_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    section: Mapped[str | None] = mapped_column(String(40), index=True, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
+    kind: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    #: domestic, export or import.
+    reg_type: Mapped[str | None] = mapped_column(String(40), index=True, nullable=True)
+    formulation: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    shelf_life: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    #: Where the row came from, so any figure can be checked against the page.
+    source_file: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    source_dir: Mapped[str | None] = mapped_column(String(400), nullable=True)
+
+    #: The dose table as printed: the column headings, the raw block, and
+    #: whether the columns could be read confidently.
+    dose_head: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dose_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dose_parsed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    crops_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    clauses: Mapped[list["CertificateClause"]] = relationship(
+        back_populates="certificate",
+        cascade="all, delete-orphan",
+        order_by="CertificateClause.position",
+    )
+    sections: Mapped[list["CertificateSection"]] = relationship(
+        back_populates="certificate", cascade="all, delete-orphan"
+    )
+    dose_rows: Mapped[list["DoseRow"]] = relationship(
+        back_populates="certificate",
+        cascade="all, delete-orphan",
+        order_by="DoseRow.position",
+    )
+
+
+class CertificateClause(Base):
+    """A clause on a certificate, in the order it is printed."""
+
+    __tablename__ = "certificate_clauses"
+    __table_args__ = (
+        UniqueConstraint(
+            "certificate_id", "position", name="uq_certificate_clause_position"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(
+        ForeignKey("certificates.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    clause_id: Mapped[int] = mapped_column(
+        ForeignKey("clauses.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    certificate: Mapped[Certificate] = relationship(back_populates="clauses")
+    clause: Mapped[Clause] = relationship()
+
+
+class CertificateSection(Base):
+    """A named section of the approved label or leaflet.
+
+    ``name`` is the source's own key — ``L_`` for label, ``F_`` for leaflet —
+    kept as printed rather than renamed, so a section can be matched back to
+    the document without a lookup table.
+    """
+
+    __tablename__ = "certificate_sections"
+    __table_args__ = (
+        UniqueConstraint("certificate_id", "name", name="uq_certificate_section_name"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(
+        ForeignKey("certificates.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    text_block_id: Mapped[int] = mapped_column(
+        ForeignKey("text_blocks.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+
+    certificate: Mapped[Certificate] = relationship(back_populates="sections")
+    text_block: Mapped[TextBlock] = relationship()
+
+
+class DoseRow(Base):
+    """One row of a certificate's crop, pest and dose table.
+
+    The columns differ from certificate to certificate, so the cells are kept
+    as a list against the certificate's own ``dose_head`` rather than forced
+    into fixed columns the source does not have.
+    """
+
+    __tablename__ = "dose_rows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(
+        ForeignKey("certificates.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cells: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+
+    certificate: Mapped[Certificate] = relationship(back_populates="dose_rows")
+
+
+class Endorsement(Base):
+    """One item from the minutes of a Registration Committee meeting."""
+
+    __tablename__ = "endorsements"
+    __table_args__ = (
+        Index("ix_endorsements_meeting", "rc_meeting"),
+        Index("ix_endorsements_en", "en_number"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rc_meeting: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: Agenda item reference within the meeting, e.g. "8.2".
+    agenda_ref: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    page: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    #: Unbounded on purpose: a single item can carry a list of EN numbers
+    #: ("EN-55483, EN-55485, ..."), and the longest in the current minutes is
+    #: 148 characters. A fixed ceiling here is a bug waiting for the next
+    #: import, and PostgreSQL enforces one where SQLite silently ignores it.
+    en_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    applicant: Mapped[str | None] = mapped_column(String(400), index=True, nullable=True)
+    product: Mapped[str | None] = mapped_column(String(400), index=True, nullable=True)
+    cir_number: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    endorsement_type: Mapped[str | None] = mapped_column(String(200), index=True, nullable=True)
+    request: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(120), index=True, nullable=True)
+    #: The committee's remark accompanying the decision, where there was one.
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: How confidently the row was read from the minutes: the source marks each
+    #: item, and ``caveat`` says what was uncertain when it is not clean.
+    confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    caveat: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ImportSource(Base):
+    """An approved source of import, or an indigenous manufacturer."""
+
+    __tablename__ = "import_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    technical: Mapped[str] = mapped_column(String(400), index=True, nullable=False)
+    cir_number: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    #: "certificate" when read off one of our own certificates, else the list.
+    via: Mapped[str | None] = mapped_column(String(40), index=True, nullable=True)
+    supplier: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    #: The named manufacturers; a plain list, since it is only ever read whole.
+    manufacturers: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+
+
+
 # Importing the audit module here registers its ``before_flush`` listener. It
 # lives at the bottom of this file, after every model is defined, so that any
 # code touching the ORM gets the trail without having to remember to ask for it.

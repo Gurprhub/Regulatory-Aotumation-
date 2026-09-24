@@ -8,12 +8,13 @@ roles; the authorisation rules themselves are tested in ``test_auth.py``.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterator
 from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -34,8 +35,30 @@ def days_from_now(days: int) -> str:
     return (TODAY + timedelta(days=days)).isoformat()
 
 
+#: Point this at a PostgreSQL URL to run the whole suite against the database
+#: production actually uses, e.g.
+#:
+#:     TEST_DATABASE_URL=postgresql+psycopg://app:app@localhost/regulatory_test pytest
+#:
+#: The role needs to own the schema, since each test drops and recreates it.
+#: Unset, the suite runs against in-memory SQLite, which is fast and needs
+#: nothing installed.
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
+
+
 @pytest.fixture
 def db_engine():
+    if TEST_DATABASE_URL:
+        engine = create_engine(TEST_DATABASE_URL)
+        with engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
+        Base.metadata.create_all(engine)
+        try:
+            yield engine
+        finally:
+            engine.dispose()
+        return
+
     # StaticPool keeps every connection pointed at the same in-memory database.
     engine = create_engine(
         "sqlite://",

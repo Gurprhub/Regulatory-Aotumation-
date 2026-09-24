@@ -139,6 +139,70 @@ SHA-256 digest is stored, so it cannot be recovered — mint a new one instead.
 Signing out deletes the session server-side, so a copy of the cookie taken
 beforehand is worthless afterwards.
 
+## The CIRcle register
+
+`/circle` serves **Regulatory CIRcle**, a read-only browser over the CIB&RC
+certificates themselves: 300 registrations with their conditions, approved
+label and leaflet text and full crop/pest/dose tables, 7,536 endorsements read
+from 116 RC meeting minutes, and the source-of-import lists.
+
+It is a self-contained page carrying its own dataset, copied from the published
+artifact and kept byte-identical to it so it can be refreshed by copying again.
+Two consequences worth knowing:
+
+* Because the data is inline, the page is served **only to a signed-in
+  account** — an anonymous request is redirected to sign in, not handed a 401
+  body, since a browser asking for a page wants the sign-in screen.
+* Its **Notes** tab is backed by the artifact platform's own storage, so it
+  works at the artifact's claude.ai link and reports itself unavailable here.
+  The page handles that itself rather than failing.
+
+### The archive in the database
+
+The same data is also imported into the database, so it can be queried, joined
+and served through the API rather than only read on the page:
+
+```bash
+python -m scripts.import_circle            # skips if already loaded
+python -m scripts.import_circle --replace  # reload after refreshing the page
+```
+
+The importer reads `app/static/circle.html` itself — the very file `/circle` is
+served from — so the page and the database cannot drift apart. It parses the
+datasets as JSON by matching delimiters; nothing in the page is executed.
+
+| Table | Rows | |
+| --- | --- | --- |
+| `certificates` | 300 | one per CIB&RC certificate |
+| `clauses` | 125 | conditions, stored once and shared |
+| `certificate_clauses` | 6,438 | which certificate carries which, in order |
+| `text_blocks` | 3,636 | label and leaflet text, stored once |
+| `certificate_sections` | 5,147 | named sections of each document |
+| `dose_rows` | 1,713 | crop, pest and dose, as printed |
+| `endorsements` | 7,536 | items from 116 RC meetings |
+| `import_sources` | 367 | approved sources and manufacturers |
+
+Read it at `/api/archive/certificates`, `/api/archive/endorsements`,
+`/api/archive/sources` and `/api/archive/summary`, all needing a signed-in
+account like everything else.
+
+Three decisions worth knowing:
+
+* **The archive is read-only.** There is no endpoint that writes to it — a
+  correction means fixing the source document and re-importing, not editing a
+  row. Every certificate keeps its `source_file`, so any figure can be checked
+  against the page it came from.
+* **It is not in the audit trail.** It is a copy of source documents rather
+  than a record of anyone's decisions, and importing it would otherwise append
+  some twelve thousand events and bury the decisions that matter.
+* **Dose tables are kept as printed.** The columns differ from certificate to
+  certificate, so each row holds its cells as a list against that
+  certificate's own `dose_head`, rather than being forced into fixed columns
+  the source does not have.
+
+The import is idempotent: it matches certificates on their item number and
+rebuilds their contents, so running it twice leaves the same rows.
+
 ## Audit trail
 
 Every change to a register or an account is recorded: who made it, when, and
@@ -284,6 +348,72 @@ Items that are already expired or non-compliant always appear in the queue
 regardless of the horizon — a lapsed licence does not stop mattering because you
 asked about the next 14 days.
 
+## Deploying
+
+The application ships as a container. `docker-compose.yml` runs it with a
+PostgreSQL database; the same image runs on any container host (Fly.io, Render,
+AWS App Runner or ECS, Cloud Run, Azure Container Apps, or a Docker host of
+your own).
+
+```bash
+cp .env.example .env     # then set POSTGRES_PASSWORD
+docker compose up --build
+```
+
+The dashboard is then on <http://localhost:8000>. Create the first account with:
+
+```bash
+docker compose exec app python -m scripts.create_admin
+```
+
+### Before it faces anyone
+
+| | Why |
+| --- | --- |
+| **`SESSION_COOKIE_SECURE=true`** | The session cookie is sent over plain HTTP otherwise. It defaults to `false` only so the app works on `localhost`; anywhere reached over HTTPS this must be on. |
+| **Terminate TLS in front of it** | The app speaks HTTP. Put it behind your host's load balancer, or nginx/Caddy on your own box. The image already passes `--proxy-headers`, so the app sees the real scheme and client address rather than the proxy's. |
+| **Set `DATABASE_URL` to PostgreSQL** | SQLite in a container dies with the container unless the file is on a mounted volume. Compose does this for you. |
+| **Back up the database** | The registers and the audit trail are the record. `pg_dump` on a schedule. |
+| **Keep `BOOTSTRAP_ADMIN_*` out of the running environment** | They only act while no accounts exist, but there is no reason to leave a password in the environment afterwards. Prefer `scripts.create_admin`. |
+
+### Configuration in production
+
+Everything in [Configuration](#configuration) applies. Two more the container
+reads:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WEB_CONCURRENCY` | `4` | Uvicorn worker processes. Sessions and tokens live in the database, so any worker serves any request. |
+| `PORT` | `8000` | Host port in the compose file. The container always listens on 8000. |
+
+### Schema
+
+`python -m scripts.init_db` creates any missing tables and exits; the container
+runs it before starting the workers, so several workers cannot race to create
+the same tables on first boot. It is safe on every deploy and leaves existing
+tables alone.
+
+There is no migration tool here. Adding a column to a model will not alter a
+table that already exists — introduce Alembic before the first schema change
+that has to preserve live data.
+
+### Running the tests against PostgreSQL
+
+The suite runs on in-memory SQLite by default. To run it against the database
+production uses:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://user:pass@localhost/regulatory_test pytest
+```
+
+Each test drops and recreates the schema, so only one run at a time may point
+at a given database — two concurrent runs will tear each other's tables down.
+
+CI does both. That job earned its place: a SQLite-only suite hid a connection
+hook that sent SQLite's `PRAGMA foreign_keys=ON` to PostgreSQL, which only
+appeared when the suite was first pointed at a real server.
+
+
 ## Data model notes
 
 * State and union territory names are normalised against a fixed list, so
@@ -336,8 +466,12 @@ app/
   services.py     persistence helpers and cross-register aggregation
   routers/        one module per register, plus the dashboard
   static/         the bundled dashboard UI (no build step)
+Dockerfile        production image; non-root, no build tools at runtime
+docker-compose.yml  the app plus PostgreSQL
 scripts/
-  seed.py         sample portfolio, dated relative to today
-  create_admin.py create or reset an administrator, interactively
+  seed.py           sample portfolio, dated relative to today
+  create_admin.py   create or reset an administrator, interactively
+  init_db.py        create missing tables, then exit
+  import_circle.py  load the certificate archive from the served page
 tests/
 ```

@@ -5,15 +5,20 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
+from app import auth as authn  # the core module; app.routers.auth is the router
 from app.config import settings
+from app.database import get_session
 from app.database import init_db
+from sqlalchemy.orm import Session
 from app.bootstrap import bootstrap_admin
 from app.routers import (
+    archive,
     audit,
     auth,
     dashboard,
@@ -69,10 +74,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# The CIRcle page is a single 7.6 MB document; gzip takes it to a fraction of
+# that over the wire, and every JSON response benefits too.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 for router in (
     auth.router,
     users.router,
     audit.router,
+    archive.router,
     tokens.router,
     products.router,
     registrations.router,
@@ -111,3 +121,23 @@ def index() -> FileResponse:
 @app.get("/login", include_in_schema=False)
 def login_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "login.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """Served app-wide so no page has to declare its own, and none 404s."""
+    return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/circle", include_in_schema=False)
+def circle(request: Request, db: Session = Depends(get_session)):
+    """The Regulatory CIRcle register: certificates, endorsements and sources.
+
+    Unlike the dashboard shell, this page carries its whole dataset inline, so
+    it is served only to a signed-in account. A browser asking for a page wants
+    the sign-in screen rather than a 401 body, so an anonymous request is
+    redirected there and sent back here afterwards.
+    """
+    if authn.current_user_or_none(request, db) is None:
+        return RedirectResponse("/login?next=/circle", status_code=303)
+    return FileResponse(STATIC_DIR / "circle.html")

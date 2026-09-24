@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 
 from sqlalchemy import create_engine, event
@@ -29,8 +30,15 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 @event.listens_for(Engine, "connect")
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
-    """SQLite ignores foreign keys unless they are switched on per connection."""
-    if engine.dialect.name != "sqlite":
+    """SQLite ignores foreign keys unless they are switched on per connection.
+
+    The test is on the connection itself, not on the module-level ``engine``.
+    The listener is registered against every ``Engine`` in the process, and a
+    process can hold more than one: asking the module engine what dialect this
+    connection speaks gets the wrong answer as soon as they differ, and sends
+    ``PRAGMA`` to a server that has never heard of it.
+    """
+    if not isinstance(dbapi_connection, sqlite3.Connection):
         return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
