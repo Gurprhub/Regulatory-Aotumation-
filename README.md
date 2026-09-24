@@ -386,16 +386,38 @@ reads:
 | `WEB_CONCURRENCY` | `4` | Uvicorn worker processes. Sessions and tokens live in the database, so any worker serves any request. |
 | `PORT` | `8000` | Host port in the compose file. The container always listens on 8000. |
 
-### Schema
+### Schema and migrations
 
-`python -m scripts.init_db` creates any missing tables and exits; the container
-runs it before starting the workers, so several workers cannot race to create
-the same tables on first boot. It is safe on every deploy and leaves existing
-tables alone.
+The schema is managed with **Alembic**. `python -m scripts.init_db` brings the
+database up to the latest revision and exits; the container runs it before
+starting the workers, so several workers cannot race to migrate at once. It is
+safe on every deploy.
 
-There is no migration tool here. Adding a column to a model will not alter a
-table that already exists — introduce Alembic before the first schema change
-that has to preserve live data.
+```bash
+python -m scripts.init_db                                  # upgrade to head
+alembic revision --autogenerate -m "what changed"          # after a model change
+alembic upgrade head        # or downgrade -1, history, current
+alembic upgrade head --sql  # print the SQL instead of running it
+```
+
+`alembic.ini` deliberately carries **no connection string**: `migrations/env.py`
+takes it from `DATABASE_URL` through `app.config`, so the app and its migrations
+can never point at different databases.
+
+**A database created before Alembic was introduced is adopted, not rebuilt.**
+Its tables already exist but it has no `alembic_version`, so a plain upgrade
+would try to `CREATE TABLE` over live tables and fail. `init_db` detects that,
+stamps it at the baseline revision, and then upgrades — the schema is left
+alone and the data with it. This is not hypothetical: every database this
+project created before this existed is in that state.
+
+After changing a model, generate a migration and commit it. A test asserts that
+a migrated database matches the models exactly, so drift fails the build rather
+than surfacing in production:
+
+```
+models and migrations have drifted; run 'alembic revision --autogenerate -m "..."'
+```
 
 ### Running the tests against PostgreSQL
 
@@ -455,6 +477,7 @@ leave nothing behind?).
 
 ```
 app/
+  migrate.py      runs migrations, and adopts a pre-Alembic database
   audit.py        the trail: captures every change at flush time
   auth.py         who the caller is, and what their role permits
   security.py     password hashing, session ids and API token generation
@@ -468,6 +491,8 @@ app/
   static/         the bundled dashboard UI (no build step)
 Dockerfile        production image; non-root, no build tools at runtime
 docker-compose.yml  the app plus PostgreSQL
+alembic.ini       migration config; the URL comes from app.config, not here
+migrations/       Alembic environment and revision history
 scripts/
   seed.py           sample portfolio, dated relative to today
   create_admin.py   create or reset an administrator, interactively

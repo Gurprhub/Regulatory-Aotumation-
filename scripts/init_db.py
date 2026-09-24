@@ -1,10 +1,12 @@
-"""Create any missing tables, then exit.
+"""Bring the database up to the latest migration, then exit.
 
 Run once before starting the web workers. Doing it here rather than letting
-several workers race to create the same tables on first boot is the difference
-between a clean start and one worker dying on a duplicate-table error.
+several workers race is the difference between a clean start and one worker
+dying part-way through a migration.
 
-It is safe to run on every deploy: existing tables are left alone.
+Safe on every deploy. A database created before Alembic was introduced is
+stamped at the baseline rather than rebuilt, so its data survives — see
+:mod:`app.migrate`.
 """
 
 from __future__ import annotations
@@ -18,8 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 
 def main() -> None:
-    init_db()
-    logging.getLogger("app.init_db").info("Schema is up to date.")
+    init_db()  # app.migrate logs what it did
     # Creates the first administrator only while no accounts exist at all.
     bootstrap_admin()
 
