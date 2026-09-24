@@ -25,7 +25,7 @@ if config.config_file_name is not None:
 # A caller may already have set the URL (app.migrate does, and the tests
 # point it at a scratch database); only fall back to the app's own setting.
 if not config.get_main_option("sqlalchemy.url", None):
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+    config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

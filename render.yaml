@@ -1,0 +1,45 @@
+# Render Blueprint: the published image plus a managed PostgreSQL.
+#
+# Create it once from the Render dashboard (New > Blueprint, pick this
+# repository) or the "Deploy to Render" button in the README. Render asks
+# for BOOTSTRAP_ADMIN_EMAIL; the first administrator's password is generated
+# and shown under the service's Environment tab. Sign in, then change it.
+#
+# Plans are the smallest that keep data: Render's free PostgreSQL is deleted
+# after 30 days, which is no place for compliance records.
+services:
+  - type: web
+    name: regulatory-automation
+    runtime: image
+    image:
+      # Built, smoke-tested against PostgreSQL and pushed by publish.yml.
+      url: ghcr.io/gurprhub/regulatory-aotumation:latest
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: regulatory-db
+          property: connectionString
+      # Render serves the app over HTTPS only.
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      # Two workers fit the starter plan's 512 MB.
+      - key: WEB_CONCURRENCY
+        value: "2"
+      # Used only while the database holds no accounts at all.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        generateValue: true
+
+databases:
+  - name: regulatory-db
+    databaseName: regulatory
+    user: regulatory
+    plan: basic-256mb
+    region: singapore
+    postgresMajorVersion: "16"
+    # Reachable from the app over Render's private network only.
+    ipAllowList: []
