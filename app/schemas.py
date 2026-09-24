@@ -433,3 +433,19 @@ class ApiTokenCreated(ApiTokenRead):
     """Returned once, at creation: the only time the plaintext is available."""
 
     token: str
+
+
+# --------------------------------------------------------------------------- #
+# Audit trail
+# --------------------------------------------------------------------------- #
+class AuditEventRead(_Base):
+    id: int
+    occurred_at: datetime
+    actor_id: int | None
+    actor_email: str
+    actor_name: str
+    action: str
+    entity_type: str
+    entity_id: int | None
+    entity_label: str
+    changes: dict

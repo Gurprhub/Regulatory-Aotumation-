@@ -139,6 +139,67 @@ SHA-256 digest is stored, so it cannot be recovered — mint a new one instead.
 Signing out deletes the session server-side, so a copy of the cookie taken
 beforehand is worthless afterwards.
 
+## Audit trail
+
+Every change to a register or an account is recorded: who made it, when, and
+what the record said before. Capture hangs off SQLAlchemy's flush rather than
+living in each endpoint, so a change is recorded because it reached the
+database — not because someone remembered to log it. An endpoint added later is
+audited without being told to, and a change made from a script or the shell is
+recorded on the same terms as one made from the dashboard.
+
+The event is written in the same transaction as the change it describes, so the
+two commit or roll back together. There is no window in which a record is
+amended but the trail does not say so, and a rejected change leaves no trace.
+
+```
+GET /api/audit       the trail, most recent first
+GET /api/audit.csv   the same, as a CSV for an auditor
+```
+
+Filters: `entity_type`, `entity_id` (together these give one record's full
+history), `actor_email`, `action` (`create`, `update`, `delete`), `since`,
+`until`, `limit`, `offset`.
+
+```bash
+# Everything that happened to registration 12, including its creation
+curl 'localhost:8000/api/audit?entity_type=registration&entity_id=12'
+
+# Everything one person changed this month
+curl 'localhost:8000/api/audit?actor_email=someone@example.com&since=2026-09-01'
+```
+
+An event reads correctly years later, on purpose:
+
+* The actor's name and address and the record's label are **copied into the
+  event**, not referenced. Deleting an account does not take its history with
+  it, and a deleted record's entry still says which product and state it
+  concerned.
+* Updates carry both sides — `{"valid_until": {"from": "2026-10-15", "to":
+  "2027-03-31"}}`. The previous value is read from the database during the
+  flush, while the row still holds it, so it is recorded whether or not the
+  application happened to have the old value in memory.
+* Deleting a product records an event for **each** dependent registration, sale
+  permission and label approval, not just for the product. This is why those
+  relationships do not use `passive_deletes`: letting the database cascade
+  silently would cost one query less and lose several compliance records from
+  the trail.
+* Secrets are never written down. A password or token change is recorded as
+  having happened, with both values shown as `[redacted]`.
+* Bookkeeping the application maintains by itself — `last_login_at`, failed
+  sign-in counts, token `last_used_at` — is not recorded. Without that, signing
+  in would append an event every time.
+
+The trail is append-only: no endpoint amends or deletes an event, and a test
+asserts that no route under `/api/audit` accepts anything but `GET`. Enforcing
+that at the database level (a trigger, or revoking `UPDATE`/`DELETE` on the
+table from the application's role) is worth doing if the trail must stand up to
+a determined insider rather than to accident.
+
+Anyone signed in may read the register trail — that is the point of keeping
+one. Events about accounts and API tokens are restricted to admins.
+
+
 ## API
 
 All payloads are JSON and every endpoint needs an account (see
@@ -203,6 +264,9 @@ POST   /api/tokens                 mint one (plaintext shown once)
 DELETE /api/tokens/{id}            revoke one
 ```
 
+Changes to accounts are recorded in the [audit trail](#audit-trail) like any
+other change.
+
 Deactivating an account (`PATCH {"is_active": false}`) is preferred over
 deleting it: the register keeps referring to accounts that acted on it, and
 reactivation is a single flag. The last active administrator cannot be demoted,
@@ -230,7 +294,8 @@ asked about the next 14 days.
   number is unique within its state; a label approval is unique per number *and*
   version, so successive versions can coexist.
 * Deleting a product cascades to its registrations, sale permissions and label
-  approvals. The UI warns before doing it.
+  approvals. The UI warns before doing it, and the audit trail records each
+  record that went.
 * Licences link to the products they cover (many-to-many), so
   `/api/licences?product_id=3` answers "what may we still make and sell?".
 
@@ -250,10 +315,17 @@ caller — asserted by walking the route table, so a new endpoint added without
 protection fails the suite — that each role is held to its own permissions, and
 that sessions and tokens actually die when revoked, expired or deactivated.
 
+The audit tests lean on the cases where a naive implementation quietly loses the
+answer it exists to give: a record amended in a later request (is the previous
+value still recorded?), a cascading delete (is each removed record recorded?), a
+deleted account (does its history survive?), and a rejected change (does it
+leave nothing behind?).
+
 ### Layout
 
 ```
 app/
+  audit.py        the trail: captures every change at flush time
   auth.py         who the caller is, and what their role permits
   security.py     password hashing, session ids and API token generation
   bootstrap.py    first-run administrator from the environment

@@ -34,6 +34,7 @@
       <button class="tab" data-view="sale-permissions" role="tab">Sale permissions</button>
       <button class="tab" data-view="licences" role="tab">Licences</button>
       <button class="tab" data-view="label-approvals" role="tab">Label approvals</button>
+      <button class="tab" data-view="audit" role="tab">Audit trail</button>
     </nav>
 
     <main>
@@ -79,6 +80,45 @@
             <h2>By register</h2>
           </header>
           <div id="register-breakdown" class="table-wrap"></div>
+        </section>
+      </section>
+
+      <!-- Audit trail -->
+      <section id="view-audit" class="view" hidden>
+        <section class="panel">
+          <header class="panel-header">
+            <div>
+              <h2>Audit trail</h2>
+              <p class="hint" id="audit-summary">
+                Every change to the registers, most recent first.
+              </p>
+            </div>
+            <div class="controls">
+              <label>
+                Record type
+                <select id="audit-entity"><option value="">All</option></select>
+              </label>
+              <label>
+                Action
+                <select id="audit-action">
+                  <option value="">All</option>
+                  <option value="create">Created</option>
+                  <option value="update">Amended</option>
+                  <option value="delete">Deleted</option>
+                </select>
+              </label>
+              <label>
+                Changed by
+                <input type="text" id="audit-actor" placeholder="email address" />
+              </label>
+              <label>
+                Since
+                <input type="date" id="audit-since" />
+              </label>
+              <a class="button" id="audit-csv" href="/api/audit.csv">Export CSV</a>
+            </div>
+          </header>
+          <div id="audit-table" class="table-wrap"></div>
         </section>
       </section>
 

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app import auth, compliance, schemas, services
+from app import audit, auth, compliance, schemas, services
 from app.config import settings
 from app.database import get_session
 from app.reference import (
@@ -133,6 +133,7 @@ def reference() -> dict[str, object]:
             {"key": key, "label": compliance.REGISTER_LABELS[key]}
             for key in services.REGISTER_KEYS
         ],
+        "audit_entity_types": sorted(set(audit.AUDITED.values())),
         "thresholds": {
             "critical_days": settings.critical_days,
             "warning_days": settings.warning_days,

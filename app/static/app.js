@@ -510,6 +510,72 @@ async function renderQueue() {
 }
 
 // --------------------------------------------------------------------------- //
+// Audit trail
+// --------------------------------------------------------------------------- //
+const AUDIT_ACTIONS = { create: "Created", update: "Amended", delete: "Deleted" };
+
+/** Render one event's changes as readable lines rather than raw JSON. */
+function renderChanges(changes) {
+  const entries = Object.entries(changes || {});
+  if (!entries.length) return "—";
+
+  const lines = entries.map(([field, value]) => {
+    const label = humanise(field);
+    if ("added" in value || "removed" in value) {
+      const parts = [];
+      if (value.added && value.added.length) parts.push(`added ${value.added.join(", ")}`);
+      if (value.removed && value.removed.length) parts.push(`removed ${value.removed.join(", ")}`);
+      return `${label}: ${parts.join("; ") || "no change"}`;
+    }
+    const from = value.from === null || value.from === undefined ? "—" : String(value.from);
+    const to = value.to === null || value.to === undefined ? "—" : String(value.to);
+    return value.from === null ? `${label}: ${to}` : `${label}: ${from} → ${to}`;
+  });
+
+  return el(
+    "div",
+    { class: "changes" },
+    lines.map((line) => el("div", {}, line)),
+  );
+}
+
+async function renderAudit() {
+  const params = new URLSearchParams({ limit: "200" });
+  const entity = document.getElementById("audit-entity").value;
+  const action = document.getElementById("audit-action").value;
+  const actor = document.getElementById("audit-actor").value.trim();
+  const since = document.getElementById("audit-since").value;
+  if (entity) params.set("entity_type", entity);
+  if (action) params.set("action", action);
+  if (actor) params.set("actor_email", actor);
+  if (since) params.set("since", since);
+
+  document.getElementById("audit-csv").href = `/api/audit.csv?${params}`;
+
+  const events = await api(`/api/audit?${params}`);
+  document.getElementById("audit-summary").textContent =
+    `${events.length} event${events.length === 1 ? "" : "s"}, most recent first.`;
+
+  renderTable(
+    document.getElementById("audit-table"),
+    [
+      {
+        header: "When",
+        class: "numeric",
+        render: (row) => new Date(row.occurred_at).toLocaleString(),
+      },
+      { header: "Who", render: (row) => row.actor_name || row.actor_email },
+      { header: "Action", render: (row) => AUDIT_ACTIONS[row.action] || row.action },
+      { header: "Type", render: (row) => humanise(row.entity_type) },
+      { header: "Record", render: (row) => row.entity_label },
+      { header: "Changes", render: (row) => renderChanges(row.changes) },
+    ],
+    events,
+    "Nothing recorded yet.",
+  );
+}
+
+// --------------------------------------------------------------------------- //
 // Register views
 // --------------------------------------------------------------------------- //
 const filterState = {};
@@ -741,11 +807,15 @@ function showView(view) {
   for (const tab of document.querySelectorAll(".tab")) {
     tab.classList.toggle("active", tab.dataset.view === view);
   }
-  const isDashboard = view === "dashboard";
-  document.getElementById("view-dashboard").hidden = !isDashboard;
-  document.getElementById("view-register").hidden = isDashboard;
+  document.getElementById("view-dashboard").hidden = view !== "dashboard";
+  document.getElementById("view-audit").hidden = view !== "audit";
+  document.getElementById("view-register").hidden =
+    view === "dashboard" || view === "audit";
 
-  const work = isDashboard ? renderDashboard() : renderRegister(view);
+  let work;
+  if (view === "dashboard") work = renderDashboard();
+  else if (view === "audit") work = renderAudit();
+  else work = renderRegister(view);
   work.catch((error) => showBanner(error.message));
 }
 
@@ -800,6 +870,19 @@ async function bootstrap() {
     document
       .getElementById(control)
       .addEventListener("change", () => renderQueue().catch((error) => showBanner(error.message)));
+  }
+
+  const auditEntity = document.getElementById("audit-entity");
+  auditEntity.append(
+    ...optionList(
+      reference.audit_entity_types.map((key) => ({ value: key, label: humanise(key) })),
+    ),
+  );
+  for (const control of ["audit-entity", "audit-action", "audit-actor", "audit-since"]) {
+    const node = document.getElementById(control);
+    node.addEventListener("change", () =>
+      renderAudit().catch((error) => showBanner(error.message)),
+    );
   }
 
   for (const tab of document.querySelectorAll(".tab")) {

@@ -14,6 +14,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    JSON,
     Column,
     Date,
     DateTime,
@@ -125,14 +126,20 @@ class Product(TimestampMixin, Base):
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # ``passive_deletes`` is deliberately off on these three. The database would
+    # cascade them away by itself, but then the ORM never sees the children and
+    # the audit trail records only "product deleted" while several compliance
+    # records vanish unrecorded. Letting SQLAlchemy delete them costs a query
+    # and buys one audit event per record removed. The ON DELETE CASCADE in the
+    # schema stays as a backstop for deletes that do not go through the ORM.
     registrations: Mapped[list["Registration"]] = relationship(
-        back_populates="product", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="product", cascade="all, delete-orphan"
     )
     sale_permissions: Mapped[list["StateSalePermission"]] = relationship(
-        back_populates="product", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="product", cascade="all, delete-orphan"
     )
     label_approvals: Mapped[list["LabelApproval"]] = relationship(
-        back_populates="product", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="product", cascade="all, delete-orphan"
     )
     licences: Mapped[list["Licence"]] = relationship(
         secondary=licence_products, back_populates="products"
@@ -165,11 +172,13 @@ class Registration(TimestampMixin, ValidityMixin, Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="registrations")
+    # Likewise off here: deleting a registration detaches its permissions and
+    # labels (ON DELETE SET NULL), which is a change each of them should carry.
     sale_permissions: Mapped[list["StateSalePermission"]] = relationship(
-        back_populates="registration", passive_deletes=True
+        back_populates="registration"
     )
     label_approvals: Mapped[list["LabelApproval"]] = relationship(
-        back_populates="registration", passive_deletes=True
+        back_populates="registration"
     )
 
 
@@ -287,7 +296,7 @@ class User(TimestampMixin, Base):
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
     api_tokens: Mapped[list["ApiToken"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -345,3 +354,46 @@ class ApiToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="api_tokens")
+
+
+# --------------------------------------------------------------------------- #
+# Audit trail
+# --------------------------------------------------------------------------- #
+class AuditEvent(Base):
+    """One recorded change to the registers or to an account.
+
+    The trail is append-only and self-contained: the actor's name and address
+    and the subject's label are copied in at the time of the change, so an event
+    still reads correctly after the account that made it, or the record it
+    describes, has been deleted. Nothing here points at a row that may vanish.
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_entity", "entity_type", "entity_id"),
+        Index("ix_audit_occurred", "occurred_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True, nullable=False
+    )
+
+    #: Who acted. Denormalised on purpose — see the class docstring.
+    actor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actor_email: Mapped[str] = mapped_column(String(320), index=True, nullable=False)
+    actor_name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    action: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(60), index=True, nullable=False)
+    entity_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    entity_label: Mapped[str] = mapped_column(String(300), nullable=False)
+
+    #: ``{field: {"from": old, "to": new}}``. Empty for a delete.
+    changes: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+# Importing the audit module here registers its ``before_flush`` listener. It
+# lives at the bottom of this file, after every model is defined, so that any
+# code touching the ORM gets the trail without having to remember to ask for it.
+from app import audit as _audit  # noqa: E402,F401

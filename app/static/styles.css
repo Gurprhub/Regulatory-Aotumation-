@@ -509,3 +509,16 @@ body.centred {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* --------------------------------------------------------------- changes -- */
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.changes > div {
+  color: var(--text-muted);
+}

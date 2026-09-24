@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import security
+from app import audit, security
 from app.config import settings
 from app.models import ApiToken, User, UserSession
 from app.database import get_session
@@ -162,6 +162,8 @@ def current_user_or_none(
     user = _user_from_cookie(db, request) or _user_from_bearer(db, request)
     if user is None or not user.is_active:
         return None
+    # Everything this request writes is attributed to them.
+    audit.set_actor(db, user)
     return user
 
 

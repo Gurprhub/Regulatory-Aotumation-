@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import init_db
 from app.bootstrap import bootstrap_admin
 from app.routers import (
+    audit,
     auth,
     dashboard,
     label_approvals,
@@ -71,6 +72,7 @@ app = FastAPI(
 for router in (
     auth.router,
     users.router,
+    audit.router,
     tokens.router,
     products.router,
     registrations.router,
