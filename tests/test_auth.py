@@ -471,3 +471,23 @@ class TestApiTokens:
         sign_in(nosy, "nosy@example.com")
         # 404 rather than 403: the existence of someone else's token is not news.
         assert nosy.delete(f"/api/tokens/{created['id']}").status_code == 404
+
+
+class TestCircleRegister:
+    """The CIRcle page carries its dataset inline, so it must not be public."""
+
+    def test_anonymous_is_sent_to_sign_in(self, raw_client: TestClient) -> None:
+        response = raw_client.get("/circle", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login?next=/circle"
+
+    def test_anonymous_never_receives_the_data(self, raw_client: TestClient) -> None:
+        response = raw_client.get("/circle", follow_redirects=False)
+        assert "ENDORSE" not in response.text
+        assert "CIR-" not in response.text
+
+    def test_signed_in_account_gets_the_page(self, viewer_client: TestClient) -> None:
+        response = viewer_client.get("/circle")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert "Regulatory" in response.text

@@ -139,6 +139,28 @@ SHA-256 digest is stored, so it cannot be recovered — mint a new one instead.
 Signing out deletes the session server-side, so a copy of the cookie taken
 beforehand is worthless afterwards.
 
+## The CIRcle register
+
+`/circle` serves **Regulatory CIRcle**, a read-only browser over the CIB&RC
+certificates themselves: 300 registrations with their conditions, approved
+label and leaflet text and full crop/pest/dose tables, 7,536 endorsements read
+from 116 RC meeting minutes, and the source-of-import lists.
+
+It is a self-contained page carrying its own dataset, copied from the published
+artifact and kept byte-identical to it so it can be refreshed by copying again.
+Two consequences worth knowing:
+
+* Because the data is inline, the page is served **only to a signed-in
+  account** — an anonymous request is redirected to sign in, not handed a 401
+  body, since a browser asking for a page wants the sign-in screen.
+* Its **Notes** tab is backed by the artifact platform's own storage, so it
+  works at the artifact's claude.ai link and reports itself unavailable here.
+  The page handles that itself rather than failing.
+
+The data is a frozen snapshot: it is not in the database, so it is not covered
+by the registers, the renewal queue or the audit trail. Importing it is the
+next step.
+
 ## Audit trail
 
 Every change to a register or an account is recorded: who made it, when, and
