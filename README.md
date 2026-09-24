@@ -350,10 +350,26 @@ asked about the next 14 days.
 
 ## Deploying
 
-The application ships as a container. `docker-compose.yml` runs it with a
-PostgreSQL database; the same image runs on any container host (Fly.io, Render,
-AWS App Runner or ECS, Cloud Run, Azure Container Apps, or a Docker host of
-your own).
+The application ships as a container. **CI builds and publishes it** to this
+repository's own registry on every push to `main`, so there is always a current
+image to pull:
+
+```bash
+docker pull ghcr.io/gurprhub/regulatory-aotumation-:latest
+```
+
+It is tagged by branch, by commit SHA, by semver on a `v*` tag, and `latest` on
+`main`. Nothing needs configuring for that — the workflow authenticates with the
+token GitHub provides.
+
+The image is **smoke-tested before it is published**, against a real PostgreSQL:
+the container must migrate the database, import the archive, answer `/health`,
+refuse an anonymous `/api/dashboard` with 401, serve a signed-in one, and run as
+a non-root user. A container that cannot do those never reaches the registry.
+
+`docker-compose.yml` runs it locally with a PostgreSQL database; the same image
+runs on any container host (Fly.io, Render, AWS App Runner or ECS, Cloud Run,
+Azure Container Apps, or a Docker host of your own).
 
 ```bash
 cp .env.example .env     # then set POSTGRES_PASSWORD

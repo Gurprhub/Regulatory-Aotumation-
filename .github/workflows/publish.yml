@@ -1,0 +1,190 @@
+name: Publish image
+
+# Builds the container, proves it actually runs, and publishes it to this
+# repository's own package registry. GITHUB_TOKEN covers the push, so no
+# credentials need configuring for this to work.
+#
+# The image is built and smoke-tested *before* it is pushed: a container that
+# cannot migrate its database or serve a request never reaches the registry.
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: regulatory
+          POSTGRES_PASSWORD: regulatory
+          POSTGRES_DB: regulatory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U regulatory -d regulatory"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lowercase the image name
+        # ghcr.io rejects uppercase, and this repository's name has some.
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          # Loaded into the local daemon first so the smoke test below runs
+          # against the very image that would be published.
+          load: true
+          push: false
+          tags: regulatory:candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the image
+        run: |
+          set -euo pipefail
+
+          docker run -d --name candidate \
+            --network host \
+            -e DATABASE_URL='postgresql+psycopg://regulatory:regulatory@127.0.0.1:5432/regulatory' \
+            -e BOOTSTRAP_ADMIN_EMAIL='smoke@example.com' \
+            -e BOOTSTRAP_ADMIN_PASSWORD='a-long-smoke-test-passphrase' \
+            -e WEB_CONCURRENCY=2 \
+            regulatory:candidate
+
+          echo "Waiting for the container to become healthy..."
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              echo "up after ${attempt}s"
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "::error::container never became healthy"
+              docker logs candidate
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "--- health ---"
+          curl -fsS http://127.0.0.1:8000/health
+
+          echo "--- migrations ran (alembic_version is stamped) ---"
+          docker exec candidate python -c "
+          from sqlalchemy import create_engine, text
+          import os
+          e = create_engine(os.environ['DATABASE_URL'])
+          with e.connect() as c:
+              v = c.execute(text('SELECT version_num FROM alembic_version')).scalar()
+          assert v, 'no alembic_version row'
+          print('alembic_version:', v)
+          "
+
+          echo "--- the archive imported ---"
+          docker exec candidate python -c "
+          from sqlalchemy import create_engine, func, select
+          from app.models import Certificate, Endorsement
+          import os
+          e = create_engine(os.environ['DATABASE_URL'])
+          with e.connect() as c:
+              certs = c.execute(select(func.count()).select_from(Certificate.__table__)).scalar()
+              ends = c.execute(select(func.count()).select_from(Endorsement.__table__)).scalar()
+          assert certs == 300, certs
+          assert ends == 7536, ends
+          print(f'{certs} certificates, {ends} endorsements')
+          "
+
+          echo "--- the API is closed to anonymous callers ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/dashboard)
+          test "$code" = "401" || { echo "::error::expected 401, got $code"; exit 1; }
+          echo "anonymous /api/dashboard -> $code"
+
+          echo "--- and open to a real one ---"
+          curl -fsS -c /tmp/jar -X POST http://127.0.0.1:8000/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"smoke@example.com","password":"a-long-smoke-test-passphrase"}' >/dev/null
+          curl -fsS -b /tmp/jar http://127.0.0.1:8000/api/dashboard >/dev/null
+          echo "signed-in /api/dashboard -> 200"
+
+          echo "--- it does not run as root ---"
+          whoami_out=$(docker exec candidate whoami)
+          test "$whoami_out" = "app" || { echo "::error::running as $whoami_out"; exit 1; }
+          echo "container user: $whoami_out"
+
+          docker rm -f candidate >/dev/null
+
+      - name: Log in to the registry
+        # Only publish from the default branch and tags; a pull request builds
+        # and tests the image but must not push one.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Image"
+            echo
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "Built and smoke-tested; not published (pull request)."
+            else
+              echo "Published to \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`:"
+              echo
+              echo '```'
+              echo "${{ steps.meta.outputs.tags }}"
+              echo '```'
+              echo
+              echo "Pull and run it:"
+              echo
+              echo '```bash'
+              echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
