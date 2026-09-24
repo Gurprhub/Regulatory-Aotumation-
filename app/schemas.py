@@ -449,3 +449,78 @@ class AuditEventRead(_Base):
     entity_id: int | None
     entity_label: str
     changes: dict
+
+
+# --------------------------------------------------------------------------- #
+# The certificate archive
+#
+# Read-only: these records are imported from source documents, so there are no
+# create or update schemas to go with them.
+# --------------------------------------------------------------------------- #
+class ClauseRead(_Base):
+    position: int
+    text: str
+
+
+class SectionRead(_Base):
+    name: str
+    text: str
+
+
+class DoseRowRead(_Base):
+    position: int
+    label: str | None
+    cells: list[str]
+
+
+class CertificateSummary(_Base):
+    id: int
+    item_no: int
+    title: str
+    cir_number: str | None = None
+    section: str | None = None
+    category: str | None = None
+    reg_type: str | None = None
+    formulation: str | None = None
+    shelf_life: str | None = None
+
+
+class CertificateDetail(CertificateSummary):
+    file_number: str | None = None
+    kind: str | None = None
+    source_file: str | None = None
+    source_dir: str | None = None
+    dose_head: str | None = None
+    dose_parsed: bool = False
+    crops_summary: str | None = None
+    clauses: list[ClauseRead] = Field(default_factory=list)
+    sections: list[SectionRead] = Field(default_factory=list)
+    dose_rows: list[DoseRowRead] = Field(default_factory=list)
+
+
+class EndorsementRead(_Base):
+    id: int
+    rc_meeting: int
+    agenda_ref: str | None = None
+    page: str | None = None
+    en_number: str | None = None
+    applicant: str | None = None
+    product: str | None = None
+    cir_number: str | None = None
+    endorsement_type: str | None = None
+    request: str | None = None
+    decision: str | None = None
+    remark: str | None = None
+    #: "verified" or "best-effort" — how confidently the row was read from the
+    #: minutes. ``caveat`` says what was uncertain when it is not clean.
+    confidence: str | None = None
+    caveat: str | None = None
+
+
+class ImportSourceRead(_Base):
+    id: int
+    technical: str
+    cir_number: str | None = None
+    via: str | None = None
+    supplier: str | None = None
+    manufacturers: list[str] = Field(default_factory=list)

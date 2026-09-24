@@ -18,6 +18,7 @@ from app.database import init_db
 from sqlalchemy.orm import Session
 from app.bootstrap import bootstrap_admin
 from app.routers import (
+    archive,
     audit,
     auth,
     dashboard,
@@ -81,6 +82,7 @@ for router in (
     auth.router,
     users.router,
     audit.router,
+    archive.router,
     tokens.router,
     products.router,
     registrations.router,
