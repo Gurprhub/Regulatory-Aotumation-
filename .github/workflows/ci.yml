@@ -26,7 +26,7 @@ jobs:
       - name: Run tests
         run: pytest
 
-      - name: Check the app boots and seeds
+      - name: Check the app boots, seeds and enforces authentication
         run: |
           python -m scripts.seed
           python -c "
@@ -34,9 +34,24 @@ jobs:
           from app.main import app
           with TestClient(app) as client:
               assert client.get('/health').json()['status'] == 'ok'
+
+              # The bootstrap administrator is created from the environment.
+              anon = client.get('/api/dashboard')
+              assert anon.status_code == 401, anon.status_code
+              print('anonymous dashboard ->', anon.status_code)
+
+              signed_in = client.post('/api/auth/login', json={
+                  'email': 'ci-admin@example.com',
+                  'password': 'ci-only-throwaway-passphrase',
+              })
+              assert signed_in.status_code == 200, signed_in.text
+
               summary = client.get('/api/dashboard').json()
               assert sum(summary['totals'].values()) > 0, summary
               print('boot check ok:', summary['totals'])
           "
         env:
           DATABASE_URL: sqlite:///./ci-check.db
+          # Throwaway credentials for this ephemeral runner database only.
+          BOOTSTRAP_ADMIN_EMAIL: ci-admin@example.com
+          BOOTSTRAP_ADMIN_PASSWORD: ci-only-throwaway-passphrase

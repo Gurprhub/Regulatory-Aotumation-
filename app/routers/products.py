@@ -6,11 +6,15 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app import models, schemas, services
+from app import auth, models, schemas, services
 from app.database import get_session
 from app.reference import FormulationType, ProductCategory
 
-router = APIRouter(prefix="/api/products", tags=["products"])
+router = APIRouter(
+    prefix="/api/products",
+    tags=["products"],
+    dependencies=[Depends(auth.require_viewer)],
+)
 
 
 @router.get("", response_model=list[schemas.ProductRead])
@@ -46,7 +50,12 @@ def get_product(
     return services.get_or_404(session, models.Product, product_id, "Product")
 
 
-@router.post("", response_model=schemas.ProductRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=schemas.ProductRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(auth.require_editor)],
+)
 def create_product(
     payload: schemas.ProductCreate, session: Session = Depends(get_session)
 ) -> models.Product:
@@ -59,7 +68,11 @@ def create_product(
     return product
 
 
-@router.patch("/{product_id}", response_model=schemas.ProductRead)
+@router.patch(
+    "/{product_id}",
+    response_model=schemas.ProductRead,
+    dependencies=[Depends(auth.require_editor)],
+)
 def update_product(
     product_id: int,
     payload: schemas.ProductUpdate,
@@ -72,7 +85,11 @@ def update_product(
     return product
 
 
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(auth.require_editor)],
+)
 def delete_product(product_id: int, session: Session = Depends(get_session)) -> Response:
     """Delete a product together with its registrations, permissions and labels."""
     product = services.get_or_404(session, models.Product, product_id, "Product")

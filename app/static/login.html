@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in · Regulatory Automation</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6f4a'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="centred">
+    <main class="signin">
+      <h1>Regulatory Automation</h1>
+      <p class="tagline">
+        Registrations, state sale permissions, licences and label approvals
+      </p>
+
+      <form id="signin-form" autocomplete="on">
+        <div class="field">
+          <label for="email">Email address</label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            autocomplete="username"
+            required
+            autofocus
+          />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+        <p id="signin-error" class="dialog-error" hidden></p>
+        <button type="submit" class="button primary wide" id="signin-submit">Sign in</button>
+      </form>
+
+      <p class="hint signin-foot">
+        No account yet? An administrator creates one for you.
+      </p>
+    </main>
+
+    <script type="module">
+      const form = document.getElementById("signin-form");
+      const errorBox = document.getElementById("signin-error");
+      const submit = document.getElementById("signin-submit");
+
+      /** Only ever return to a path on this site — never an absolute URL. */
+      function safeNext() {
+        const raw = new URLSearchParams(location.search).get("next") || "/";
+        return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/";
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        errorBox.hidden = true;
+        submit.disabled = true;
+        try {
+          const response = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: document.getElementById("email").value,
+              password: document.getElementById("password").value,
+            }),
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            const detail = body && body.detail;
+            throw new Error(
+              typeof detail === "string" ? detail : "Could not sign in. Please try again.",
+            );
+          }
+          location.replace(safeNext());
+        } catch (error) {
+          errorBox.textContent = error.message;
+          errorBox.hidden = false;
+          document.getElementById("password").value = "";
+          submit.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

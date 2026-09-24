@@ -6,11 +6,15 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app import models, schemas, services
+from app import auth, models, schemas, services
 from app.database import get_session
 from app.reference import ComplianceState, ComplianceStatus, LicenceType, normalise_state
 
-router = APIRouter(prefix="/api/licences", tags=["licences"])
+router = APIRouter(
+    prefix="/api/licences",
+    tags=["licences"],
+    dependencies=[Depends(auth.require_viewer)],
+)
 
 
 @router.get("", response_model=list[schemas.LicenceRead])
@@ -52,7 +56,12 @@ def get_licence(licence_id: int, session: Session = Depends(get_session)) -> mod
     return services.get_or_404(session, models.Licence, licence_id, "Licence")
 
 
-@router.post("", response_model=schemas.LicenceRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=schemas.LicenceRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(auth.require_editor)],
+)
 def create_licence(
     payload: schemas.LicenceCreate, session: Session = Depends(get_session)
 ) -> models.Licence:
@@ -68,7 +77,11 @@ def create_licence(
     return licence
 
 
-@router.patch("/{licence_id}", response_model=schemas.LicenceRead)
+@router.patch(
+    "/{licence_id}",
+    response_model=schemas.LicenceRead,
+    dependencies=[Depends(auth.require_editor)],
+)
 def update_licence(
     licence_id: int,
     payload: schemas.LicenceUpdate,
@@ -86,7 +99,11 @@ def update_licence(
     return licence
 
 
-@router.delete("/{licence_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{licence_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(auth.require_editor)],
+)
 def delete_licence(licence_id: int, session: Session = Depends(get_session)) -> Response:
     licence = services.get_or_404(session, models.Licence, licence_id, "Licence")
     session.delete(licence)

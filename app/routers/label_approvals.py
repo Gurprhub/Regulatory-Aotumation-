@@ -6,11 +6,15 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app import models, schemas, services
+from app import auth, models, schemas, services
 from app.database import get_session
 from app.reference import ComplianceState, ComplianceStatus
 
-router = APIRouter(prefix="/api/label-approvals", tags=["label approvals"])
+router = APIRouter(
+    prefix="/api/label-approvals",
+    tags=["label approvals"],
+    dependencies=[Depends(auth.require_viewer)],
+)
 
 
 @router.get("", response_model=list[schemas.LabelApprovalRead])
@@ -56,7 +60,8 @@ def get_label_approval(
 
 
 @router.post(
-    "", response_model=schemas.LabelApprovalRead, status_code=status.HTTP_201_CREATED
+    "", response_model=schemas.LabelApprovalRead, status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(auth.require_editor)],
 )
 def create_label_approval(
     payload: schemas.LabelApprovalCreate, session: Session = Depends(get_session)
@@ -75,7 +80,11 @@ def create_label_approval(
     return approval
 
 
-@router.patch("/{approval_id}", response_model=schemas.LabelApprovalRead)
+@router.patch(
+    "/{approval_id}",
+    response_model=schemas.LabelApprovalRead,
+    dependencies=[Depends(auth.require_editor)],
+)
 def update_label_approval(
     approval_id: int,
     payload: schemas.LabelApprovalUpdate,
@@ -94,7 +103,11 @@ def update_label_approval(
     return approval
 
 
-@router.delete("/{approval_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{approval_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(auth.require_editor)],
+)
 def delete_label_approval(
     approval_id: int, session: Session = Depends(get_session)
 ) -> Response:

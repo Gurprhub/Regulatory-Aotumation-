@@ -7,12 +7,13 @@ the caller having to ask for it separately.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Self
 
 from pydantic import (
     AliasChoices,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     computed_field,
@@ -30,10 +31,23 @@ from app.reference import (
     ProductCategory,
     RegistrationPurpose,
     RegistrationSection,
+    Role,
     normalise_state,
 )
 
 NonEmptyStr = Annotated[str, Field(min_length=1, max_length=500)]
+
+#: Email addresses are stored folded to lower case so sign-in is case-insensitive.
+EmailLike = Annotated[
+    str,
+    Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
+    BeforeValidator(lambda v: v.strip().casefold() if isinstance(v, str) else v),
+]
+
+#: Minimum password length. Length is the control that matters most here; the
+#: app does not impose composition rules, which push people towards predictable
+#: substitutions without adding real entropy.
+MIN_PASSWORD_LENGTH = 12
 
 
 class _Base(BaseModel):
@@ -357,3 +371,81 @@ def _attach_product_name(model: type[BaseModel], data):  # noqa: ANN001
     }
     payload["product_name"] = product.name
     return payload
+
+
+# --------------------------------------------------------------------------- #
+# Accounts, sign-in and API tokens
+# --------------------------------------------------------------------------- #
+class LoginRequest(_Base):
+    email: EmailLike
+    password: NonEmptyStr
+
+
+class UserBase(_Base):
+    email: EmailLike
+    full_name: NonEmptyStr
+    role: Role = Role.VIEWER
+    is_active: bool = True
+
+
+class UserCreate(UserBase):
+    password: Annotated[str, Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)]
+
+
+class UserUpdate(_Base):
+    email: EmailLike | None = None
+    full_name: str | None = Field(default=None, min_length=1, max_length=200)
+    role: Role | None = None
+    is_active: bool | None = None
+    password: Annotated[str, Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)] | None = (
+        None
+    )
+
+
+class UserRead(UserBase):
+    id: int
+    last_login_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class PasswordChange(_Base):
+    current_password: NonEmptyStr
+    new_password: Annotated[str, Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)]
+
+
+class ApiTokenCreate(_Base):
+    name: NonEmptyStr
+    expires_in_days: int | None = Field(
+        default=None, ge=1, le=3650, description="Leave empty for a token that never expires."
+    )
+
+
+class ApiTokenRead(_Base):
+    id: int
+    name: str
+    created_at: datetime | None = None
+    expires_at: datetime | None = None
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class ApiTokenCreated(ApiTokenRead):
+    """Returned once, at creation: the only time the plaintext is available."""
+
+    token: str
+
+
+# --------------------------------------------------------------------------- #
+# Audit trail
+# --------------------------------------------------------------------------- #
+class AuditEventRead(_Base):
+    id: int
+    occurred_at: datetime
+    actor_id: int | None
+    actor_email: str
+    actor_name: str
+    action: str
+    entity_type: str
+    entity_id: int | None
+    entity_label: str
+    changes: dict
