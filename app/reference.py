@@ -86,6 +86,28 @@ class ComplianceState(StrEnum):
     NON_COMPLIANT = "non_compliant"  # suspended / cancelled / surrendered
 
 
+class Role(StrEnum):
+    """What a signed-in account may do.
+
+    Roles are ordered: an admin can do everything an editor can, and an editor
+    everything a viewer can. :func:`role_at_least` is the only place that
+    ordering is encoded.
+    """
+
+    VIEWER = "viewer"  # read every register
+    EDITOR = "editor"  # create, amend and delete records
+    ADMIN = "admin"  # manage user accounts as well
+
+
+#: Increasing order of privilege.
+_ROLE_RANK: dict[Role, int] = {Role.VIEWER: 0, Role.EDITOR: 1, Role.ADMIN: 2}
+
+
+def role_at_least(role: Role, minimum: Role) -> bool:
+    """True when ``role`` carries at least the privilege of ``minimum``."""
+    return _ROLE_RANK[role] >= _ROLE_RANK[minimum]
+
+
 #: States and union territories that issue agrochemical licences.
 INDIAN_STATES: tuple[str, ...] = (
     "Andhra Pradesh",

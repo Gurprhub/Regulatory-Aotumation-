@@ -26,6 +26,8 @@ const TILE_ORDER = [
 
 /** Populated from /api/reference on load. */
 let reference = null;
+/** The signed-in account, from /api/auth/me. */
+let currentUser = null;
 /** Product list, cached for the product pickers. */
 let productCache = [];
 
@@ -37,6 +39,11 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
+  // The session has gone (expired, revoked, or never existed): start again.
+  if (response.status === 401) {
+    redirectToSignIn();
+    throw new Error("Your session has ended. Please sign in again.");
+  }
   if (response.status === 204) return null;
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
@@ -60,6 +67,16 @@ function formatApiError(body, status) {
       .join("\n");
   }
   return `Request failed (HTTP ${status}).`;
+}
+
+function redirectToSignIn() {
+  const next = encodeURIComponent(location.pathname + location.search);
+  location.replace(`/login?next=${next}`);
+}
+
+/** True when the signed-in account may change records. */
+function canEdit() {
+  return currentUser !== null && (currentUser.role === "editor" || currentUser.role === "admin");
 }
 
 function showBanner(message) {
@@ -525,16 +542,18 @@ async function renderRegister(key) {
       }
       controls.append(el("label", {}, [filter.label, input]));
     }
-    controls.append(
-      el(
-        "button",
-        {
-          class: "button primary",
-          onclick: () => openDialog(key, null).catch((error) => showBanner(error.message)),
-        },
-        `Add ${config.singular}`,
-      ),
-    );
+    if (canEdit()) {
+      controls.append(
+        el(
+          "button",
+          {
+            class: "button primary",
+            onclick: () => openDialog(key, null).catch((error) => showBanner(error.message)),
+          },
+          `Add ${config.singular}`,
+        ),
+      );
+    }
   }
 
   await loadRegisterRows(key);
@@ -552,9 +571,10 @@ async function loadRegisterRows(key) {
   document.getElementById("register-count").textContent =
     `${rows.length} record${rows.length === 1 ? "" : "s"}`;
 
-  const columns = [
-    ...config.columns(),
-    {
+  const columns = [...config.columns()];
+  // A viewer gets a read-only table rather than buttons that would 403.
+  if (canEdit()) {
+    columns.push({
       header: "",
       render: (row) =>
         el("div", {}, [
@@ -575,8 +595,8 @@ async function loadRegisterRows(key) {
             "Delete",
           ),
         ]),
-    },
-  ];
+    });
+  }
   renderTable(document.getElementById("register-table"), columns, rows, "No records yet.");
 
   if (key === "products") productCache = rows;
@@ -729,7 +749,37 @@ function showView(view) {
   work.catch((error) => showBanner(error.message));
 }
 
+function renderUserChip() {
+  const holder = document.getElementById("user-chip");
+  holder.replaceChildren(
+    el("span", {}, currentUser.full_name),
+    el("span", { class: "role" }, currentUser.role),
+    el(
+      "button",
+      {
+        class: "button ghost",
+        onclick: async () => {
+          try {
+            await api("/api/auth/logout", { method: "POST" });
+          } finally {
+            location.replace("/login");
+          }
+        },
+      },
+      "Sign out",
+    ),
+  );
+}
+
 async function bootstrap() {
+  try {
+    currentUser = await api("/api/auth/me");
+  } catch {
+    // api() has already redirected to the sign-in page on a 401.
+    return;
+  }
+  renderUserChip();
+
   try {
     reference = await api("/api/reference");
   } catch (error) {

@@ -12,13 +12,17 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.config import settings
 from app.database import init_db
+from app.bootstrap import bootstrap_admin
 from app.routers import (
+    auth,
     dashboard,
     label_approvals,
     licences,
     products,
     registrations,
     sale_permissions,
+    tokens,
+    users,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -36,12 +40,24 @@ Track agrochemical regulatory compliance in one place:
 Every record carries a derived `compliance_state` and `days_remaining`, computed
 from its dates on each read, and `/api/alerts` merges all four registers into a
 single renewal queue ordered by urgency.
+
+## Access
+
+Every endpoint below requires a signed-in account. Authenticate either with a
+session cookie (`POST /api/auth/login`, used by the dashboard) or with a bearer
+token minted at `POST /api/tokens`:
+
+    Authorization: Bearer rat_...
+
+Roles are cumulative: **viewer** reads every register, **editor** also creates,
+amends and deletes records, **admin** also manages accounts.
 """
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    bootstrap_admin()
     yield
 
 
@@ -53,6 +69,9 @@ app = FastAPI(
 )
 
 for router in (
+    auth.router,
+    users.router,
+    tokens.router,
     products.router,
     registrations.router,
     sale_permissions.router,
@@ -79,4 +98,14 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
+    """The dashboard shell.
+
+    The page itself is public; it holds no data. Everything it renders comes
+    from the API, which redirects the browser here to /login on a 401.
+    """
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/login", include_in_schema=False)
+def login_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "login.html")

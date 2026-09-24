@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app import models, schemas, services
+from app import auth, models, schemas, services
 from app.database import get_session
 from app.reference import (
     ComplianceState,
@@ -15,7 +15,11 @@ from app.reference import (
     RegistrationSection,
 )
 
-router = APIRouter(prefix="/api/registrations", tags=["registrations"])
+router = APIRouter(
+    prefix="/api/registrations",
+    tags=["registrations"],
+    dependencies=[Depends(auth.require_viewer)],
+)
 
 
 @router.get("", response_model=list[schemas.RegistrationRead])
@@ -62,7 +66,8 @@ def get_registration(
 
 
 @router.post(
-    "", response_model=schemas.RegistrationRead, status_code=status.HTTP_201_CREATED
+    "", response_model=schemas.RegistrationRead, status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(auth.require_editor)],
 )
 def create_registration(
     payload: schemas.RegistrationCreate, session: Session = Depends(get_session)
@@ -77,7 +82,11 @@ def create_registration(
     return registration
 
 
-@router.patch("/{registration_id}", response_model=schemas.RegistrationRead)
+@router.patch(
+    "/{registration_id}",
+    response_model=schemas.RegistrationRead,
+    dependencies=[Depends(auth.require_editor)],
+)
 def update_registration(
     registration_id: int,
     payload: schemas.RegistrationUpdate,
@@ -95,7 +104,11 @@ def update_registration(
     return registration
 
 
-@router.delete("/{registration_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{registration_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(auth.require_editor)],
+)
 def delete_registration(
     registration_id: int, session: Session = Depends(get_session)
 ) -> Response:

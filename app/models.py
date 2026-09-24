@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     Date,
@@ -35,6 +36,7 @@ from app.reference import (
     ProductCategory,
     RegistrationPurpose,
     RegistrationSection,
+    Role,
 )
 
 
@@ -249,3 +251,97 @@ class LabelApproval(TimestampMixin, ValidityMixin, Base):
 
     product: Mapped[Product] = relationship(back_populates="label_approvals")
     registration: Mapped[Registration | None] = relationship(back_populates="label_approvals")
+
+
+# --------------------------------------------------------------------------- #
+# Accounts and credentials
+# --------------------------------------------------------------------------- #
+class User(TimestampMixin, Base):
+    """A person who may sign in.
+
+    Deactivating an account (``is_active = False``) is preferred over deleting
+    it: a compliance register should keep referring to accounts that once acted
+    on it, and reactivation is a single flag.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), index=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[Role] = mapped_column(_enum(Role), default=Role.VIEWER, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Consecutive failed sign-in attempts; reset on success.
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: Set while the account is temporarily locked after repeated failures.
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    api_tokens: Mapped[list["ApiToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class UserSession(Base):
+    """A browser session. Only the hash of the session id is stored."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    session_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class ApiToken(Base):
+    """A long-lived bearer token for scripts and integrations.
+
+    The plaintext is shown once at creation and never stored. ``lookup`` holds
+    the token's leading characters so verification is an indexed read rather
+    than a scan, and ``token_hash`` is compared in constant time.
+    """
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    lookup: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    user: Mapped[User] = relationship(back_populates="api_tokens")

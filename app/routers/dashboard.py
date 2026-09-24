@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app import compliance, schemas, services
+from app import auth, compliance, schemas, services
 from app.config import settings
 from app.database import get_session
 from app.reference import (
@@ -24,7 +24,11 @@ from app.reference import (
     RegistrationSection,
 )
 
-router = APIRouter(prefix="/api", tags=["dashboard"])
+router = APIRouter(
+    prefix="/api",
+    tags=["dashboard"],
+    dependencies=[Depends(auth.require_viewer)],
+)
 
 CSV_COLUMNS = (
     "register",
