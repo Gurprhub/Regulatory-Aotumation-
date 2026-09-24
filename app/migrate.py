@@ -45,7 +45,11 @@ def alembic_config(url: str | None = None) -> Config:
     config.set_main_option(
         "script_location", str(ALEMBIC_INI.parent / "migrations")
     )
-    config.set_main_option("sqlalchemy.url", url or settings.database_url)
+    # Alembic stores options in a ConfigParser, which treats "%" as the start
+    # of an interpolation, so a URL-encoded password (p%40ss) would crash it.
+    config.set_main_option(
+        "sqlalchemy.url", (url or settings.database_url).replace("%", "%%")
+    )
     return config
 
 

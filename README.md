@@ -70,7 +70,7 @@ Read from the environment:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | `sqlite:///./regulatory.db` | Any SQLAlchemy URL. SQLite needs no setup; point it at PostgreSQL for shared use. |
+| `DATABASE_URL` | `sqlite:///./regulatory.db` | Any SQLAlchemy URL. SQLite needs no setup; point it at PostgreSQL for shared use. A bare `postgres://` or `postgresql://` URL, as hosted databases hand out, is switched to the bundled psycopg 3 driver automatically. |
 | `CRITICAL_DAYS` | `30` | Items within this many days of expiry are `critical`. |
 | `WARNING_DAYS` | `90` | Items within this many days are `expiring_soon`; also the default alert horizon. |
 
@@ -382,6 +382,34 @@ The dashboard is then on <http://localhost:8000>. Create the first account with:
 docker compose exec app python -m scripts.create_admin
 ```
 
+### On Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Gurprhub/Regulatory-Aotumation-)
+
+[`render.yaml`](render.yaml) describes the whole deployment: the published
+image as a web service and a managed PostgreSQL 16 beside it, both in
+Singapore, the database reachable from the app only. Render terminates TLS,
+so `SESSION_COOKIE_SECURE` is already on.
+
+1. Click the button (or, in the Render dashboard, **New → Blueprint** and pick
+   this repository). Render asks for `BOOTSTRAP_ADMIN_EMAIL`; enter the
+   address the first administrator will sign in with, then **Apply**.
+2. When the service is live, open its **Environment** tab and copy the
+   generated `BOOTSTRAP_ADMIN_PASSWORD`. Sign in at the service's
+   `onrender.com` address and change the password.
+3. Delete both `BOOTSTRAP_ADMIN_*` variables from the service. They only act
+   while no accounts exist, and nothing needs them afterwards.
+
+The plans are the smallest that keep data (`starter` and `basic-256mb`, about
+US$13 a month together); Render's free database is deleted after 30 days.
+
+**Deploy every new image automatically.** Render does not watch the registry.
+In the service's **Settings**, copy the **Deploy Hook** URL and save it as the
+repository secret `RENDER_DEPLOY_HOOK_URL` (**Settings → Secrets and variables
+→ Actions**). From then on the publish workflow, after the smoke test passes
+and the image is pushed, tells Render to deploy that exact image by digest.
+Without the secret the step is skipped.
+
 ### Before it faces anyone
 
 | | Why |
@@ -400,7 +428,7 @@ reads:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `WEB_CONCURRENCY` | `4` | Uvicorn worker processes. Sessions and tokens live in the database, so any worker serves any request. |
-| `PORT` | `8000` | Host port in the compose file. The container always listens on 8000. |
+| `PORT` | `8000` | The port the container listens on. Hosts such as Render set it themselves; the compose file maps it on the host side. |
 
 ### Schema and migrations
 

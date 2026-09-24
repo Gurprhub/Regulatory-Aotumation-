@@ -31,6 +31,22 @@ def _int_env(name: str, default: int) -> int:
     return value
 
 
+def normalize_database_url(url: str) -> str:
+    """Point a bare PostgreSQL URL at the psycopg 3 driver this project ships.
+
+    Hosted databases (Render, Heroku, Fly and most others) hand out URLs that
+    start ``postgres://`` or ``postgresql://``. SQLAlchemy reads the first as
+    an unknown dialect and the second as psycopg2, which is not installed, so
+    either would fail at startup. A URL that already names a driver is left
+    alone.
+    """
+    url = url.strip()
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
 @dataclass(frozen=True)
 class Settings:
     """Runtime configuration.
@@ -40,7 +56,9 @@ class Settings:
     ``warning_days`` is a warning, and anything further out is simply valid.
     """
 
-    database_url: str = os.environ.get("DATABASE_URL", "sqlite:///./regulatory.db")
+    database_url: str = normalize_database_url(
+        os.environ.get("DATABASE_URL", "sqlite:///./regulatory.db")
+    )
     critical_days: int = _int_env("CRITICAL_DAYS", 30)
     warning_days: int = _int_env("WARNING_DAYS", 90)
 

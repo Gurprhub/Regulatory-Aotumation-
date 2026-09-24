@@ -89,6 +89,19 @@ class TestFreshDatabase:
         assert remaining == set(), remaining
 
 
+class TestUrlsWithPercentSigns:
+    """A URL-encoded password (p%40ss) must survive Alembic's config parser."""
+
+    def test_upgrade_accepts_a_percent_in_the_url(self, tmp_path) -> None:
+        url = f"sqlite:///{tmp_path}/p%40ss.db"
+        assert upgrade_to_head(url) == "created"
+        assert "alembic_version" in _tables(url)
+
+    def test_the_url_round_trips_unchanged(self) -> None:
+        url = "postgresql+psycopg://app:p%40ss@db/regulatory"
+        assert alembic_config(url).get_main_option("sqlalchemy.url") == url
+
+
 class TestAdoptingAnExistingDatabase:
     """A database built before Alembic must be stamped, never recreated."""
 
