@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest
+
+      - name: Check the app boots and seeds
+        run: |
+          python -m scripts.seed
+          python -c "
+          from fastapi.testclient import TestClient
+          from app.main import app
+          with TestClient(app) as client:
+              assert client.get('/health').json()['status'] == 'ok'
+              summary = client.get('/api/dashboard').json()
+              assert sum(summary['totals'].values()) > 0, summary
+              print('boot check ok:', summary['totals'])
+          "
+        env:
+          DATABASE_URL: sqlite:///./ci-check.db

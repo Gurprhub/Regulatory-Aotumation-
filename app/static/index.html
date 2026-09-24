@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Regulatory Automation</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6f4a'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Regulatory Automation</h1>
+        <p class="tagline">
+          Registrations, state sale permissions, licences and label approvals in one place
+        </p>
+      </div>
+      <div class="topbar-actions">
+        <span id="thresholds" class="thresholds"></span>
+        <a class="button ghost" href="/docs" target="_blank" rel="noreferrer">API docs</a>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <nav class="tabs" id="tabs" role="tablist">
+      <button class="tab active" data-view="dashboard" role="tab">Dashboard</button>
+      <button class="tab" data-view="products" role="tab">Products</button>
+      <button class="tab" data-view="registrations" role="tab">Registrations</button>
+      <button class="tab" data-view="sale-permissions" role="tab">Sale permissions</button>
+      <button class="tab" data-view="licences" role="tab">Licences</button>
+      <button class="tab" data-view="label-approvals" role="tab">Label approvals</button>
+    </nav>
+
+    <main>
+      <!-- Dashboard -->
+      <section id="view-dashboard" class="view">
+        <div id="tiles" class="tiles"></div>
+
+        <section class="panel">
+          <header class="panel-header">
+            <div>
+              <h2>Renewal queue</h2>
+              <p class="hint">
+                Every register merged into one list, most urgent first.
+              </p>
+            </div>
+            <div class="controls">
+              <label>
+                Horizon
+                <select id="queue-horizon">
+                  <option value="30">30 days</option>
+                  <option value="60">60 days</option>
+                  <option value="90" selected>90 days</option>
+                  <option value="180">180 days</option>
+                  <option value="365">365 days</option>
+                </select>
+              </label>
+              <label>
+                Register
+                <select id="queue-register"><option value="">All</option></select>
+              </label>
+              <label>
+                State
+                <select id="queue-state"><option value="">All</option></select>
+              </label>
+              <a class="button" id="queue-csv" href="/api/alerts.csv">Export CSV</a>
+            </div>
+          </header>
+          <div id="queue-table" class="table-wrap"></div>
+        </section>
+
+        <section class="panel">
+          <header class="panel-header">
+            <h2>By register</h2>
+          </header>
+          <div id="register-breakdown" class="table-wrap"></div>
+        </section>
+      </section>
+
+      <!-- Register views are rendered into this shell -->
+      <section id="view-register" class="view" hidden>
+        <section class="panel">
+          <header class="panel-header">
+            <div>
+              <h2 id="register-title"></h2>
+              <p class="hint" id="register-count"></p>
+            </div>
+            <div class="controls" id="register-controls"></div>
+          </header>
+          <div id="register-table" class="table-wrap"></div>
+        </section>
+      </section>
+    </main>
+
+    <!-- Create / edit dialog -->
+    <dialog id="record-dialog">
+      <form id="record-form" method="dialog">
+        <h2 id="dialog-title"></h2>
+        <div id="dialog-fields" class="field-grid"></div>
+        <p id="dialog-error" class="dialog-error" hidden></p>
+        <footer class="dialog-actions">
+          <button type="button" class="button ghost" id="dialog-cancel">Cancel</button>
+          <button type="submit" class="button primary" id="dialog-save">Save</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
