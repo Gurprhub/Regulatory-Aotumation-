@@ -355,7 +355,7 @@ repository's own registry on every push to `main`, so there is always a current
 image to pull:
 
 ```bash
-docker pull ghcr.io/gurprhub/regulatory-aotumation-:latest
+docker pull ghcr.io/gurprhub/regulatory-aotumation:latest
 ```
 
 It is tagged by branch, by commit SHA, by semver on a `v*` tag, and `latest` on
