@@ -284,6 +284,69 @@ Items that are already expired or non-compliant always appear in the queue
 regardless of the horizon — a lapsed licence does not stop mattering because you
 asked about the next 14 days.
 
+## Deploying
+
+The application ships as a container. `docker-compose.yml` runs it with a
+PostgreSQL database; the same image runs on any container host (Fly.io, Render,
+AWS App Runner or ECS, Cloud Run, Azure Container Apps, or a Docker host of
+your own).
+
+```bash
+cp .env.example .env     # then set POSTGRES_PASSWORD
+docker compose up --build
+```
+
+The dashboard is then on <http://localhost:8000>. Create the first account with:
+
+```bash
+docker compose exec app python -m scripts.create_admin
+```
+
+### Before it faces anyone
+
+| | Why |
+| --- | --- |
+| **`SESSION_COOKIE_SECURE=true`** | The session cookie is sent over plain HTTP otherwise. It defaults to `false` only so the app works on `localhost`; anywhere reached over HTTPS this must be on. |
+| **Terminate TLS in front of it** | The app speaks HTTP. Put it behind your host's load balancer, or nginx/Caddy on your own box. The image already passes `--proxy-headers`, so the app sees the real scheme and client address rather than the proxy's. |
+| **Set `DATABASE_URL` to PostgreSQL** | SQLite in a container dies with the container unless the file is on a mounted volume. Compose does this for you. |
+| **Back up the database** | The registers and the audit trail are the record. `pg_dump` on a schedule. |
+| **Keep `BOOTSTRAP_ADMIN_*` out of the running environment** | They only act while no accounts exist, but there is no reason to leave a password in the environment afterwards. Prefer `scripts.create_admin`. |
+
+### Configuration in production
+
+Everything in [Configuration](#configuration) applies. Two more the container
+reads:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WEB_CONCURRENCY` | `4` | Uvicorn worker processes. Sessions and tokens live in the database, so any worker serves any request. |
+| `PORT` | `8000` | Host port in the compose file. The container always listens on 8000. |
+
+### Schema
+
+`python -m scripts.init_db` creates any missing tables and exits; the container
+runs it before starting the workers, so several workers cannot race to create
+the same tables on first boot. It is safe on every deploy and leaves existing
+tables alone.
+
+There is no migration tool here. Adding a column to a model will not alter a
+table that already exists — introduce Alembic before the first schema change
+that has to preserve live data.
+
+### Running the tests against PostgreSQL
+
+The suite runs on in-memory SQLite by default. To run it against the database
+production uses:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://user:pass@localhost/regulatory_test pytest
+```
+
+CI does both. That job earned its place: a SQLite-only suite hid a connection
+hook that sent SQLite's `PRAGMA foreign_keys=ON` to PostgreSQL, which only
+appeared when the suite was first pointed at a real server.
+
+
 ## Data model notes
 
 * State and union territory names are normalised against a fixed list, so
@@ -336,8 +399,11 @@ app/
   services.py     persistence helpers and cross-register aggregation
   routers/        one module per register, plus the dashboard
   static/         the bundled dashboard UI (no build step)
+Dockerfile        production image; non-root, no build tools at runtime
+docker-compose.yml  the app plus PostgreSQL
 scripts/
   seed.py         sample portfolio, dated relative to today
   create_admin.py create or reset an administrator, interactively
+  init_db.py      create missing tables, then exit
 tests/
 ```

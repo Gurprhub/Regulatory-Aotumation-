@@ -2,3 +2,6 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 SQLAlchemy==2.0.36
 pydantic==2.10.4
+# PostgreSQL driver. SQLite needs no driver, so this is only used when
+# DATABASE_URL points at Postgres.
+psycopg[binary]==3.2.3
