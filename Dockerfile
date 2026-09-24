@@ -32,6 +32,10 @@ RUN pip install --no-index --find-links=/wheels -r requirements.txt \
 
 COPY app ./app
 COPY scripts ./scripts
+# Without these the container cannot migrate: init_db runs Alembic, which needs
+# the config and the revision history, not just the models.
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 
 USER app
 

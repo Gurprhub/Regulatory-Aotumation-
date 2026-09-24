@@ -55,7 +55,12 @@ def get_session() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create any tables that do not exist yet."""
-    from app import models  # noqa: F401  (registers the mappers)
+    """Bring the database up to the latest migration.
 
-    Base.metadata.create_all(bind=engine)
+    Imported late and called through :mod:`app.migrate` so this module stays
+    free of an Alembic dependency at import time.
+    """
+    from app import models  # noqa: F401  (registers the mappers)
+    from app.migrate import upgrade_to_head
+
+    upgrade_to_head()
