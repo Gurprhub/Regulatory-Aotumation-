@@ -13,7 +13,7 @@ services:
     runtime: image
     image:
       # Built, smoke-tested against PostgreSQL and pushed by publish.yml.
-      url: ghcr.io/gurprhub/regulatory-aotumation:latest
+      url: ghcr.io/gurprhub/regulatory-automation:latest
     plan: starter
     region: singapore
     healthCheckPath: /health

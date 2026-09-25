@@ -355,7 +355,7 @@ repository's own registry on every push to `main`, so there is always a current
 image to pull:
 
 ```bash
-docker pull ghcr.io/gurprhub/regulatory-aotumation:latest
+docker pull ghcr.io/gurprhub/regulatory-automation:latest
 ```
 
 It is tagged by branch, by commit SHA, by semver on a `v*` tag, and `latest` on
@@ -384,7 +384,7 @@ docker compose exec app python -m scripts.create_admin
 
 ### On Render
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Gurprhub/Regulatory-Aotumation-)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Gurprhub/Regulatory-Automation)
 
 [`render.yaml`](render.yaml) describes the whole deployment: the published
 image as a web service and a managed PostgreSQL 16 beside it, both in
